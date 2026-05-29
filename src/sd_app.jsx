@@ -13,6 +13,12 @@ import {
   FeatureStoreAnim, ModelServingAnim, HnswAnim, RagProdAnim,
   AgentPlatformAnim,
 } from "./sd_anims_2.jsx";
+import {
+  loadCourseProgress,
+  saveCourseProgress,
+  saveCourseSummary,
+  recordActivity,
+} from "./progress_store.js";
 
 // Combine all modules
 const ALL_MODULES = [...MODULES, ...CASE_STUDIES];
@@ -318,7 +324,7 @@ function FlashcardDeck({ onJumpToModule }) {
 export default function SDApp({ theme = "dark" }) {
   const [view, setView] = useState("modules");
   const [activeId, setActiveId] = useState(ALL_MODULES[0].id);
-  const [quizProgress, setQuizProgress] = useState({});
+  const [quizProgress, setQuizProgress] = useState(() => loadCourseProgress("sd"));
   const contentRef = useRef(null);
 
   const activeModule = ALL_MODULES.find((m) => m.id === activeId);
@@ -328,11 +334,27 @@ export default function SDApp({ theme = "dark" }) {
   }, [activeId, view]);
 
   const recordQuiz = (moduleId, quizIdx, correct) => {
-    setQuizProgress((p) => ({ ...p, [`${moduleId}::${quizIdx}`]: correct }));
+    const key = `${moduleId}::${quizIdx}`;
+    setQuizProgress((p) => {
+      const wasCorrect = !!p[key];
+      const next = { ...p, [key]: correct };
+      if (correct && !wasCorrect) recordActivity(1);
+      return next;
+    });
   };
 
+  const totalQuizzes = ALL_MODULES.reduce((sum, m) => {
+    const q = m.sections.find((s) => s.kind === "quiz");
+    return sum + (q ? q.items.length : 0);
+  }, 0);
   const correctQuizzes = Object.values(quizProgress).filter(Boolean).length;
   const attempted = Object.keys(quizProgress).length;
+
+  // Persist for resume + dashboard summary.
+  useEffect(() => {
+    saveCourseProgress("sd", quizProgress);
+    saveCourseSummary("sd", { done: correctQuizzes, total: totalQuizzes });
+  }, [quizProgress, correctQuizzes, totalQuizzes]);
 
   const stages = [...new Set(ALL_MODULES.map((m) => m.stage))];
 
@@ -386,7 +408,7 @@ export default function SDApp({ theme = "dark" }) {
                 </div>
               ))}
               <div className="sidebar-footer">
-                <div>for Arpit J.</div>
+                <div>System Design prep</div>
                 <div className="sf-dim">principal / staff system design prep</div>
               </div>
             </aside>

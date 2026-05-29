@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { MODULES } from "./ml_content.js";
+import {
+  loadCourseProgress,
+  saveCourseProgress,
+  saveCourseSummary,
+  recordActivity,
+} from "./progress_store.js";
 
 // ============================================================================
 // ANIMATIONS
@@ -1377,7 +1383,7 @@ function FlashcardDeck({ onJumpToModule }) {
 export default function MLApp({ theme = "dark" }) {
   const [view, setView] = useState("modules"); // modules | deck
   const [activeId, setActiveId] = useState(MODULES[0].id);
-  const [quizProgress, setQuizProgress] = useState({});
+  const [quizProgress, setQuizProgress] = useState(() => loadCourseProgress("ml"));
   const contentRef = useRef(null);
 
   const activeModule = MODULES.find((m) => m.id === activeId);
@@ -1387,7 +1393,14 @@ export default function MLApp({ theme = "dark" }) {
   }, [activeId, view]);
 
   const recordQuiz = (moduleId, quizIdx, correct) => {
-    setQuizProgress((p) => ({ ...p, [`${moduleId}::${quizIdx}`]: correct }));
+    const key = `${moduleId}::${quizIdx}`;
+    setQuizProgress((p) => {
+      const wasCorrect = !!p[key];
+      const next = { ...p, [key]: correct };
+      // Count first-time correct answers as a learning activity.
+      if (correct && !wasCorrect) recordActivity(1);
+      return next;
+    });
   };
 
   const totalQuizzes = MODULES.reduce((sum, m) => {
@@ -1396,6 +1409,12 @@ export default function MLApp({ theme = "dark" }) {
   }, 0);
   const correctQuizzes = Object.values(quizProgress).filter(Boolean).length;
   const attempted = Object.keys(quizProgress).length;
+
+  // Persist for cross-session resume + dashboard summary.
+  useEffect(() => {
+    saveCourseProgress("ml", quizProgress);
+    saveCourseSummary("ml", { done: correctQuizzes, total: totalQuizzes });
+  }, [quizProgress, correctQuizzes, totalQuizzes]);
 
   const stages = [...new Set(MODULES.map((m) => m.stage))];
 
@@ -1451,7 +1470,7 @@ export default function MLApp({ theme = "dark" }) {
                 </div>
               ))}
               <div className="sidebar-footer">
-                <div>for Arpit J.</div>
+                <div>ML interview prep</div>
                 <div className="sf-dim">principal / staff ML prep</div>
               </div>
             </aside>

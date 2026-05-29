@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
+import {
+  loadCourseProgress,
+  saveCourseProgress,
+  saveCourseSummary,
+  recordActivity,
+} from "./progress_store.js";
 
 // ============================================================================
 // DATA: PATTERNS + PROBLEMS (with company tags + follow-ups)
@@ -1416,7 +1422,7 @@ export default function DSAApp({ theme = "dark" }) {
   const [view, setView] = useState("pattern"); // 'pattern' | 'hot-google' | 'hot-ms'
   const [active, setActive] = useState(PATTERNS[0].id);
   const [filter, setFilter] = useState("all"); // 'all' | 'google' | 'ms' | 'principal'
-  const [done, setDone] = useState({});
+  const [done, setDone] = useState(() => loadCourseProgress("dsa"));
   const [expandedFollowup, setExpandedFollowup] = useState({});
   const contentRef = useRef(null);
 
@@ -1426,9 +1432,20 @@ export default function DSAApp({ theme = "dark" }) {
   const totalProblems = PATTERNS.reduce((s, p) => s + p.problems.length, 0);
   const doneCount = Object.values(done).filter(Boolean).length;
 
+  // Persist progress + per-course summary so the dashboard stays in sync.
+  useEffect(() => {
+    saveCourseProgress("dsa", done);
+    saveCourseSummary("dsa", { done: doneCount, total: totalProblems });
+  }, [done, doneCount, totalProblems]);
+
   const toggleDone = (patId, probIdx) => {
     const key = `${patId}::${probIdx}`;
-    setDone((d) => ({ ...d, [key]: !d[key] }));
+    setDone((d) => {
+      const next = { ...d, [key]: !d[key] };
+      // Only count flips into the "done" state as a learning activity.
+      if (next[key] && !d[key]) recordActivity(1);
+      return next;
+    });
   };
 
   const toggleFollowup = (patId, probIdx) => {
@@ -1508,7 +1525,7 @@ export default function DSAApp({ theme = "dark" }) {
                   );
                 })}
               </nav>
-              <div className="sidebar-footer">for Arpit J. · principal prep · v2</div>
+              <div className="sidebar-footer">principal prep · v2</div>
             </aside>
 
             <main className="content" ref={contentRef}>

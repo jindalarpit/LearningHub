@@ -2,6 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import DSAApp from "./dsa_app.jsx";
 import MLApp from "./ml_learning_app_new.jsx";
 import SDApp from "./sd_app.jsx";
+import {
+  getUserName,
+  setUserName,
+  loadAllSummaries,
+  weeklyActivity,
+  currentStreak,
+  totalItemsCompleted,
+  overallProgressPct,
+  onProgressChange,
+} from "./progress_store.js";
 
 /* ─── Course definitions ─── */
 const COURSES = [
@@ -125,7 +135,38 @@ function Dashboard({ onSelectCourse }) {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [mounted, setMounted] = useState(false);
 
+  // Live, per-user state pulled from localStorage.
+  const [userName, setUserNameState] = useState(() => getUserName());
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(userName);
+  const [summaries, setSummaries] = useState(() => loadAllSummaries());
+  const [streak, setStreak] = useState(() => currentStreak());
+  const [activity, setActivity] = useState(() => weeklyActivity());
+  const [itemsDone, setItemsDone] = useState(() => totalItemsCompleted());
+  const [overallProgress, setOverallProgress] = useState(() => overallProgressPct());
+
   useEffect(() => { setTimeout(() => setMounted(true), 50); }, []);
+
+  // Refresh whenever progress changes (toggles in any course, name edits,
+  // cross-tab storage events).
+  useEffect(() => {
+    const refresh = () => {
+      setUserNameState(getUserName());
+      setSummaries(loadAllSummaries());
+      setStreak(currentStreak());
+      setActivity(weeklyActivity());
+      setItemsDone(totalItemsCompleted());
+      setOverallProgress(overallProgressPct());
+    };
+    refresh();
+    return onProgressChange(refresh);
+  }, []);
+
+  const commitName = () => {
+    setUserName(nameDraft);
+    setUserNameState(getUserName());
+    setEditingName(false);
+  };
 
   const handleMouseMove = (e, id) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -133,9 +174,10 @@ function Dashboard({ onSelectCourse }) {
     setHoveredCard(id);
   };
 
-  const overallProgress = 28;
-  const weeklyActivity = [3, 5, 2, 7, 4, 6, 8];
-  const streak = 12;
+  const coursesActive = ["dsa", "ml", "sd"].filter(
+    (id) => (summaries[id]?.done || 0) > 0
+  ).length;
+  const weeklyMax = Math.max(...activity, 1);
   const todayDate = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
@@ -148,7 +190,32 @@ function Dashboard({ onSelectCourse }) {
             <span>Active Session</span>
           </div>
           <h1 className="dash-title">
-            <span className="dash-title-line">{getGreeting()}, Arpit</span>
+            {editingName ? (
+              <span className="dash-title-line dash-name-edit">
+                {getGreeting()},{" "}
+                <input
+                  className="dash-name-input"
+                  autoFocus
+                  value={nameDraft}
+                  placeholder="your name"
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitName();
+                    if (e.key === "Escape") { setNameDraft(userName); setEditingName(false); }
+                  }}
+                  onBlur={commitName}
+                />
+              </span>
+            ) : (
+              <span
+                className="dash-title-line dash-title-clickable"
+                onClick={() => { setNameDraft(userName); setEditingName(true); }}
+                title="Click to set your name"
+              >
+                {getGreeting()}{userName ? `, ${userName}` : ", learner"}
+                <span className="dash-name-edit-hint">✎</span>
+              </span>
+            )}
           </h1>
           <p className="dash-subtitle">
             Your principal-level interview prep across DSA, Machine Learning, and System Design.
@@ -173,19 +240,19 @@ function Dashboard({ onSelectCourse }) {
             <div className="stat-value"><AnimCounter end={overallProgress} />%</div>
             <div className="stat-label">Overall Progress</div>
           </div>
-          <Sparkline data={weeklyActivity} color="#3b82f6" />
+          <Sparkline data={activity} color="#3b82f6" />
         </div>
         <div className="stat-card">
           <div className="stat-icon">⚡</div>
           <div className="stat-body">
-            <div className="stat-value"><AnimCounter end={3} /></div>
+            <div className="stat-value"><AnimCounter end={coursesActive} /></div>
             <div className="stat-label">Courses Active</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon">🎯</div>
           <div className="stat-body">
-            <div className="stat-value"><AnimCounter end={42} /></div>
+            <div className="stat-value"><AnimCounter end={itemsDone} /></div>
             <div className="stat-label">Items Completed</div>
           </div>
         </div>
@@ -197,7 +264,10 @@ function Dashboard({ onSelectCourse }) {
         <span className="dash-section-badge">{COURSES.length} tracks</span>
       </div>
       <div className="dash-courses">
-        {COURSES.map((c, idx) => (
+        {COURSES.map((c, idx) => {
+          const s = summaries[c.id] || { done: 0, total: 0 };
+          const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
+          return (
           <button
             key={c.id}
             className="course-card"
@@ -221,7 +291,7 @@ function Dashboard({ onSelectCourse }) {
               <p className="card-desc">{c.longDesc}</p>
               <div className="card-stats">
                 <div className="card-stat">
-                  <ProgressRing progress={idx === 0 ? 35 : idx === 1 ? 22 : 18} size={48} stroke={3} color={c.accent} />
+                  <ProgressRing progress={pct} size={48} stroke={3} color={c.accent} />
                 </div>
                 <div className="card-meta">
                   <div className="card-meta-item"><span className="card-meta-val">{c.stats.problems}</span></div>
@@ -234,7 +304,8 @@ function Dashboard({ onSelectCourse }) {
               </div>
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {/* Weekly Activity */}
@@ -242,18 +313,28 @@ function Dashboard({ onSelectCourse }) {
         <h2 className="dash-section-title">This Week</h2>
       </div>
       <div className="dash-activity">
-        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, i) => (
-          <div key={day} className="activity-day">
-            <div className="activity-bar-wrap">
-              <div className="activity-bar" style={{
-                height: `${(weeklyActivity[i] / 8) * 100}%`,
-                background: weeklyActivity[i] > 5 ? "var(--accent-primary)" : "rgba(255,255,255,0.12)",
-                transitionDelay: `${i * 0.08}s`,
-              }} />
+        {(() => {
+          // Build day labels matching the last 7 days returned by weeklyActivity()
+          const labels = [];
+          const today = new Date();
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(today.getDate() - i);
+            labels.push(d.toLocaleDateString("en-US", { weekday: "short" }));
+          }
+          return labels.map((day, i) => (
+            <div key={`${day}-${i}`} className="activity-day">
+              <div className="activity-bar-wrap">
+                <div className="activity-bar" style={{
+                  height: `${(activity[i] / weeklyMax) * 100}%`,
+                  background: activity[i] > weeklyMax * 0.6 ? "var(--accent-primary)" : "rgba(255,255,255,0.12)",
+                  transitionDelay: `${i * 0.08}s`,
+                }} />
+              </div>
+              <span className="activity-label">{day}</span>
             </div>
-            <span className="activity-label">{day}</span>
-          </div>
-        ))}
+          ));
+        })()}
       </div>
 
       {/* Footer */}
@@ -447,6 +528,21 @@ const SHELL_CSS = `
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
 .dash-subtitle { font-size: 16px; color: var(--text-secondary); line-height: 1.7; max-width: 520px; }
+.dash-title-clickable { cursor: pointer; display: inline-flex; align-items: center; gap: 12px; }
+.dash-title-clickable:hover .dash-name-edit-hint { opacity: 1; transform: translateX(0); }
+.dash-name-edit-hint {
+  font-size: 18px; color: var(--text-tertiary); opacity: 0; transform: translateX(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease; -webkit-text-fill-color: var(--text-tertiary);
+}
+.dash-name-edit { display: inline-flex; align-items: baseline; gap: 8px; }
+.dash-name-input {
+  font: inherit; font-size: 48px; font-weight: 800; letter-spacing: -0.03em;
+  background: transparent; border: none; outline: none;
+  border-bottom: 2px dashed rgba(255,255,255,0.18);
+  color: var(--text-primary); -webkit-text-fill-color: var(--text-primary);
+  padding: 0 4px; min-width: 240px; max-width: 420px;
+}
+.dash-name-input:focus { border-bottom-color: var(--accent-primary); }
 .dash-date { font-family: var(--mono); font-size: 12px; color: var(--text-tertiary); letter-spacing: 0.02em; }
 
 .dash-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 48px; }
